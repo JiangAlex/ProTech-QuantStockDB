@@ -56,7 +56,4 @@ ProTech-QuantStockDB/
 
 ## 連線資訊
 
-- Host: blog.softsnail.com
-- Port: 2432
-- Database: twsestock
-- User: reef
+連線資訊儲存於環境變數或 `.env` 檔案中，請參閱內部文件。
