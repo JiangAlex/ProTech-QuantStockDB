@@ -4,25 +4,26 @@
 
 ## 資料庫架構
 
-共 9 個資料表，以 `stock_code` 關聯至 `stock_basic` 形成星狀結構：
+共 10 個資料表，以 `stock_code` 關聯至 `stock_basic` 形成星狀結構：
 
 | 資料表 | 說明 | 主鍵 |
 |--------|------|------|
 | **stock_basic** | 上市/櫃股票基本資料（代碼、名稱、市場別、產業分類） | stock_code |
 | **daily_kline** | 個股日K線（開高低收成交量） | (stock_code, trade_date) |
+| **daily_top50** | 每日漲跌幅排行榜（漲幅/跌幅各50檔） | (trade_date, category, rank) |
 | **sectors** | 產業分類（代碼、名稱），用於 sector_kline FK | code |
 | **sector_kline** | 產業指數日K線（VWAP 成交量加權均價） | (sector_code, trade_date) |
 | **institutional_investors** | 三大法人買賣超（外資、投信、自營商） | (stock_code, trade_date) |
 | **monthly_revenue** | 上市(TWSE)月營收，含年增率 | (stock_code, year_month) |
 | **monthly_revenue_tpex** | 上櫃(TPEx)月營收 | (stock_code, year_month) |
 | **quarterly_profit** | 季報獲利（營收、毛利率、EPS） | (stock_code, year, quarter) |
-| **industry** | 產業代碼對照表（code → 名稱），乾淨版 | code |
-| **fetch_history** | 資料擷取歷史記錄 | (stock_code, start_date) |
+| **fetch_history** | 資料擷取歷史記錄 | id |
 
 ## ER 關聯圖
 
 ```
 STOCK_BASIC ─┬─ daily_kline       (每日K線)
+             ├─ daily_top50       (漲跌幅排行榜)
              ├─ institutional_investors (法人買賣)
              ├─ monthly_revenue         (月營收-TWSE)
              ├─ monthly_revenue_tpex    (月營收-TPEx)
@@ -47,6 +48,7 @@ ProTech-QuantStockDB/
 ├── migrations/          # 資料庫遷移腳本（SQL）
 ├── scripts/             # 資料抓取腳本
 │   ├── tse_tpex_fetcher.py       # 每日日線 + 三大法人 + 類股K線
+│   ├── daily_top50.py            # 每日漲跌幅排行榜（漲幅/跌幅各50檔）
 │   ├── monthly_revenue_fetcher.py # TWSE 月營收 (t187ap05_L.csv)
 │   ├── quarterly_profit_fetcher.py # TWSE 季報 (t187ap14_L + t187ap17_L)
 │   └── sector_kline_fetcher.py    # 類股日K線 aggregation
