@@ -21,7 +21,7 @@ DB_CONFIG = {
     'host': os.getenv('PGHOST', 'blog.softsnail.com'),
     'port': int(os.getenv('PGPORT', 2432)),
     'user': os.getenv('PGUSER', 'reef'),
-    'password': os.getenv('PGPASSWORD', 'accton123'),
+    'password': os.getenv('DB_MEMORY_PASSWORD', ''),
     'database': os.getenv('PGDATABASE', 'twsestock')
 }
 
@@ -335,6 +335,52 @@ def update_stock_list(stocks: List[Tuple], market_type: str = 'TSE') -> int:
     return insert_count
 
 
+def get_recent_trading_dates(n: int = 5) -> list:
+    """取得近 n 個交易日的日期列表（不含週末）"""
+    dates = []
+    d = datetime.now().date()
+    while len(dates) < n:
+        if d.weekday() < 5:  # Mon-Fri
+            dates.append(d)
+        d -= timedelta(days=1)
+    return dates
+
+
+def get_gap_dates(lookback: int = 5, min_records: int = 500) -> list:
+    """
+    檢查近 lookback 個交易日中是否有缺口。
+    缺口定義：該交易日完全無資料（筆數=0）。
+    回傳需要補抓的日期列表（只針對過去的日子，不含今天）。
+    """
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    try:
+        recent = get_recent_trading_dates(lookback)
+        gap_dates = []
+        for d in recent[:-1]:  # 不含今天（今天可能還沒到18:00）
+            cur.execute(
+                "SELECT COUNT(*) FROM daily_kline WHERE trade_date = %s",
+                (d,)
+            )
+            count = cur.fetchone()[0]
+            if count == 0:
+                gap_dates.append(d)
+        return gap_dates
+    finally:
+        cur.close()
+        conn.close()
+
+
+def backfill_gaps(gap_dates: list) -> None:
+    """對缺口日期執行補抓"""
+    for d in sorted(gap_dates):
+        date_str = d.strftime('%Y%m%d')
+        print(f"[GAP] 偵測到缺口 {date_str}，執行補抓...")
+        date_obj = datetime.combine(d, datetime.min.time())
+        fetch_single_date(date_obj)
+        time.sleep(2)
+
+
 def fetch_single_date(date_obj: datetime = None):
     """抓取單日資料"""
     if date_obj is None:
@@ -386,10 +432,23 @@ def main():
     parser.add_argument('--start', '-s', default=None, help='開始日期 (YYYYMMDD)')
     parser.add_argument('--end', '-e', default=None, help='結束日期 (YYYYMMDD)')
     parser.add_argument('--date', '-d', default=None, help='單一日期 (YYYYMMDD)')
+    parser.add_argument('--no-backfill', action='store_true', help='跳過缺口偵測與補抓')
     args = parser.parse_args()
     
+    # 缺口偵測 + 補抓（僅 date range 模式；單日 / --date 模式跳過）
+    # 補抓過的日期不重複執行
+    backfilled_dates = set()
+    if not args.no_backfill and not args.date:
+        gap_dates = get_gap_dates(lookback=5)
+        if gap_dates:
+            print(f"[GAP] 發現 {len(gap_dates)} 個缺口，開始補抓: {[d.strftime('%Y-%m-%d') for d in gap_dates]}")
+            backfill_gaps(gap_dates)
+            backfilled_dates = {d for d in gap_dates}
+        else:
+            print("[GAP] 無缺口，無需補抓")
+    
     if args.date:
-        # Single date
+        # Single date（預設跳過缺口偵測，用 --no-backfill 明確停用時才停用）
         date_obj = datetime.strptime(args.date, '%Y%m%d')
         fetch_single_date(date_obj)
     else:
@@ -407,11 +466,17 @@ def main():
         # Generate trading days
         current = start_date
         while current <= end_date:
-            if current.weekday() < 5:  # Mon-Fri
+            if current.weekday() < 5 and current.date() not in backfilled_dates:
                 fetch_single_date(current)
                 time.sleep(1)  # Between days
             current += timedelta(days=1)
 
 
 if __name__ == '__main__':
-    main()
+    from notify import notify_error, notify_ok
+    try:
+        result = main()
+        notify_ok('TSE_TPEx_Fetcher', result)
+    except Exception as e:
+        notify_error('TSE_TPEx_Fetcher', e)
+        sys.exit(1)
