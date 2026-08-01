@@ -8,6 +8,8 @@ API Sources:
 - TPEx: https://www.tpex.org.tw/web/stock/aftertrading/DAILY_QUOTE
 """
 
+import sys
+import subprocess
 import requests
 import psycopg2
 import time
@@ -409,7 +411,6 @@ def fetch_single_date(date_obj: datetime = None):
 
     # 類股K線 aggregation
     time.sleep(1)
-    import subprocess, sys
     date_iso = date_obj.strftime('%Y-%m-%d')
     try:
         result = subprocess.run(
@@ -424,6 +425,38 @@ def fetch_single_date(date_obj: datetime = None):
             print(f"  [sector] WARN: {result.stderr[:200]}")
     except Exception as e:
         print(f"  [sector] skip: {e}")
+
+    # 漲跌幅排行榜 Top50
+    time.sleep(1)
+    try:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT_DIR / 'daily_top50.py'), date_iso],
+            capture_output=True, text=True, timeout=120
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().split('\n'):
+                if line.strip():
+                    print(f"  [top50] {line}")
+        else:
+            print(f"  [top50] WARN: {result.stderr[:200]}")
+    except Exception as e:
+        print(f"  [top50] skip: {e}")
+
+    # 國際指數 (TWII/DJI/IXIC/SOX)
+    time.sleep(1)
+    try:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT_DIR / 'backfill_us_index.py'), '--date', date_iso],
+            capture_output=True, text=True, timeout=120
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().split('\n'):
+                if line.strip():
+                    print(f"  [index] {line}")
+        else:
+            print(f"  [index] WARN: {result.stderr[:200]}")
+    except Exception as e:
+        print(f"  [index] skip: {e}")
 
 
 def main():
